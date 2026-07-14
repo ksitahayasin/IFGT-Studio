@@ -1,0 +1,3 @@
+"use client";
+import { motion } from "framer-motion";
+export function SectionHeading({ eyebrow, title, copy }: { eyebrow: string; title: string; copy?: string }) { return <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: .3 }} transition={{ duration: .6 }} className="max-w-2xl"><p className="mb-4 text-xs font-bold uppercase tracking-[.22em] text-blue-400">{eyebrow}</p><h2 className="font-display text-4xl font-medium tracking-[-.04em] sm:text-5xl">{title}</h2>{copy && <p className="mt-5 text-base leading-7 text-zinc-400 sm:text-lg">{copy}</p>}</motion.div>; }
