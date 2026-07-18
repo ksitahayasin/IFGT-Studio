@@ -81,7 +81,7 @@ export function Hero() {
               playsInline
             />
           )}
-          <div className="absolute inset-0 bg-black/60" />
+          <div className="absolute inset-0 bg-black/30" />
         </div>
       )}
       {/* Background Gallery (if no video) */}
@@ -112,7 +112,7 @@ export function Hero() {
               )}
             </div>
           ))}
-          <div className="absolute inset-0 bg-black/60" />
+          <div className="absolute inset-0 bg-black/30" />
         </div>
       )}
       {/* Background Image (if no video or gallery) */}
@@ -123,14 +123,11 @@ export function Hero() {
             alt="Hero Background"
             className="w-full h-full object-cover opacity-100"
           />
-          <div className="absolute inset-0 bg-black/60" />
+          <div className="absolute inset-0 bg-black/30" />
         </div>
       )}
 
-      <div className="absolute inset-0 grid-bg opacity-20" />
-      <div className="absolute left-[10%] top-[10%] h-[35rem] w-[35rem] rounded-full bg-blue-600/20 blur-[140px]" />
-      <div className="absolute right-[-15%] top-[20%] h-[30rem] w-[30rem] rounded-full bg-indigo-500/20 blur-[140px]" />
-      <div className="absolute inset-0 noise opacity-20" />
+
       <Container className="relative z-10 pb-20 sm:pb-28">
         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="mb-7 text-xs font-bold uppercase tracking-[.3em] text-blue-400">
           {labels.eyebrow}
