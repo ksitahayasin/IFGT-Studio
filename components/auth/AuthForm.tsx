@@ -2,15 +2,34 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, LoaderCircle, Eye, EyeOff } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  LoaderCircle,
+  XCircle,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  getPasswordStrength,
+  getUsernameIssues,
+  isValidUsername,
+  normalizeUsername,
+} from "@/lib/auth";
 
 type Mode = "sign-in" | "sign-up" | "forgot-password" | "update-password";
+type UsernameStatus = "idle" | "checking" | "available" | "invalid" | "taken" | "error";
 
 export function AuthForm({ mode: initialMode }: { mode: Mode }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageType, setMessageType] = useState<"error" | "success">("error");
+  const [username, setUsername] = useState("");
+  const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>("idle");
+  const [usernameMessage, setUsernameMessage] = useState("");
+  const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [mode, setMode] = useState<Mode>(initialMode);
   const [showPassword, setShowPassword] = useState(false);
@@ -20,6 +39,7 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
   useEffect(() => {
     const checkRecoveryMode = async () => {
       const supabase = createClient();
+      if (!supabase) return;
       const { data } = await supabase.auth.getSession();
       // If there's a session or the URL has recovery params, switch to update password mode
       const urlParams = new URLSearchParams(location.search);
@@ -38,19 +58,111 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
   const isForgotPassword = mode === "forgot-password";
   const isUpdatePassword = mode === "update-password";
   const isSignIn = mode === "sign-in";
+  const passwordStrength = getPasswordStrength(password);
+  const passwordsMatch = !confirmPassword || password === confirmPassword;
+  const usernameIssues = getUsernameIssues(username);
+
+  useEffect(() => {
+    if (!isSignUp) {
+      setUsernameStatus("idle");
+      setUsernameMessage("");
+      return;
+    }
+
+    if (!username) {
+      setUsernameStatus("idle");
+      setUsernameMessage("");
+      return;
+    }
+
+    if (!isValidUsername(username)) {
+      setUsernameStatus("invalid");
+      setUsernameMessage(usernameIssues[0] ?? "Geçersiz kullanıcı adı.");
+      return;
+    }
+
+    const controller = new AbortController();
+    let checkingTimeoutId: number;
+    
+    // Only show "checking" status after 500ms to avoid flickering
+    checkingTimeoutId = window.setTimeout(() => {
+      setUsernameStatus("checking");
+      setUsernameMessage("");
+    }, 500);
+
+    const mainTimeoutId = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/auth/check-username?username=${encodeURIComponent(username)}`,
+          { signal: controller.signal }
+        );
+        const result = (await response.json()) as {
+          available?: boolean;
+          issues?: string[];
+        };
+
+        if (controller.signal.aborted) return;
+
+        if (result.issues?.length) {
+          setUsernameStatus("invalid");
+          setUsernameMessage(result.issues[0]);
+          return;
+        }
+
+        if (result.available) {
+          setUsernameStatus("available");
+          setUsernameMessage("Kullanıcı adı kullanılabilir.");
+          return;
+        }
+
+        setUsernameStatus("taken");
+        setUsernameMessage("Kullanıcı adı zaten alınmış.");
+      } catch {
+        if (controller.signal.aborted) return;
+        setUsernameStatus("error");
+        setUsernameMessage("Kullanıcı adı kontrolü başarısız oldu.");
+      }
+    }, 350);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(mainTimeoutId);
+      window.clearTimeout(checkingTimeoutId);
+    };
+  }, [isSignUp, username, usernameIssues]);
 
   async function submit(formData: FormData) {
     setLoading(true);
     setMessage(null);
     const supabase = createClient();
+    if (!supabase) {
+      setLoading(false);
+      setMessage("Kimlik sistemi henüz yapılandırılmamış.");
+      setMessageType("error");
+      return;
+    }
 
     if (isSignUp) {
       const email = String(formData.get("email"));
-      const password = String(formData.get("password"));
-      const username = String(formData.get("username"));
+      const formPassword = String(formData.get("password"));
+      const normalizedUsername = normalizeUsername(String(formData.get("username")));
       const formConfirmPassword = String(formData.get("confirmPassword"));
-      
-      if (password !== formConfirmPassword) {
+
+      if (!isValidUsername(normalizedUsername)) {
+        setLoading(false);
+        setMessage(getUsernameIssues(String(formData.get("username")))[0] ?? "Geçersiz kullanıcı adı.");
+        setMessageType("error");
+        return;
+      }
+
+      if (usernameStatus !== "available") {
+        setLoading(false);
+        setMessage("Devam etmeden önce uygun bir kullanıcı adı seç.");
+        setMessageType("error");
+        return;
+      }
+
+      if (formPassword !== formConfirmPassword) {
         setLoading(false);
         setMessage("Şifreler eşleşmiyor.");
         setMessageType("error");
@@ -59,11 +171,11 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
 
       const result = await supabase.auth.signUp({ 
         email, 
-        password, 
+        password: formPassword, 
         options: { 
           emailRedirectTo: `${location.origin}/id`,
           data: {
-            username: username.toLowerCase()
+            username: normalizedUsername
           }
         }
       });
@@ -99,10 +211,10 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
       setMessage("Şifre sıfırlama bağlantısı e-postana gönderildi.");
       setMessageType("success");
     } else if (isUpdatePassword) {
-      const password = String(formData.get("password"));
+      const formPassword = String(formData.get("password"));
       const formConfirmPassword = String(formData.get("confirmPassword"));
       
-      if (password !== formConfirmPassword) {
+      if (formPassword !== formConfirmPassword) {
         setLoading(false);
         setMessage("Şifreler eşleşmiyor.");
         setMessageType("error");
@@ -110,7 +222,7 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
       }
 
       const result = await supabase.auth.updateUser({
-        password: password
+        password: formPassword
       });
 
       setLoading(false);
@@ -130,38 +242,29 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
       }, 2000);
     } else if (isSignIn) {
       const identifier = String(formData.get("identifier")); // can be email or username
-      const password = String(formData.get("password"));
+      const formPassword = String(formData.get("password"));
 
       let email = identifier;
-      // If it's not an email (no @), try to find by username
+
       if (!identifier.includes("@")) {
-        const { data: profile, error } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("username", identifier.toLowerCase())
-          .single();
-        
-        if (error || !profile) {
+        const response = await fetch("/api/auth/resolve-identifier", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier }),
+        });
+        const result = (await response.json()) as { email?: string; error?: string };
+
+        if (!response.ok || !result.email) {
           setLoading(false);
-          setMessage("Geçersiz kullanıcı adı veya şifre.");
+          setMessage(result.error ?? "Geçersiz kullanıcı adı veya şifre.");
           setMessageType("error");
           return;
         }
 
-        // Now get the user's email using the user id (since profiles.id = auth.users.id)
-        const { data: { user } } = await supabase.auth.admin.getUserById(profile.id);
-        
-        if (!user?.email) {
-          setLoading(false);
-          setMessage("Geçersiz kullanıcı adı veya şifre.");
-          setMessageType("error");
-          return;
-        }
-
-        email = user.email;
+        email = result.email;
       }
 
-      const result = await supabase.auth.signInWithPassword({ email, password });
+      const result = await supabase.auth.signInWithPassword({ email, password: formPassword });
       setLoading(false);
       
       if (result.error) {
@@ -222,17 +325,40 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
               {isSignUp && (
                 <label className="text-sm text-zinc-400">
                   Kullanıcı adı
-                  <input 
-                    required 
-                    name="username" 
-                    minLength={3} 
-                    maxLength={20} 
-                    pattern="[a-z0-9_]+" 
-                    type="text" 
-                    autoComplete="username" 
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-white/[.05] px-4 py-3.5 text-white outline-none focus:border-blue-500" 
-                    placeholder="ornek_oyuncu"
-                  />
+                  <div className="relative">
+                    <input 
+                      required 
+                      name="username" 
+                      minLength={3} 
+                      maxLength={20} 
+                      pattern="[a-z0-9_]+" 
+                      type="text" 
+                      autoComplete="username" 
+                      value={username}
+                      onChange={(e) => setUsername(normalizeUsername(e.target.value))}
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-white/[.05] px-4 py-3.5 pr-12 text-white outline-none focus:border-blue-500" 
+                      placeholder="ornek_oyuncu"
+                    />
+                    <span className="absolute right-4 top-[1.15rem] text-zinc-400">
+                      {usernameStatus === "checking" && <LoaderCircle size={18} className="animate-spin" />}
+                      {usernameStatus === "available" && <CheckCircle2 size={18} className="text-green-400" />}
+                      {(usernameStatus === "taken" || usernameStatus === "invalid" || usernameStatus === "error") && (
+                        <XCircle size={18} className="text-red-400" />
+                      )}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-500">
+                    3-20 karakter, sadece `a-z`, `0-9` ve `_`
+                  </p>
+                  {usernameMessage && (
+                    <p
+                      className={`mt-2 text-xs ${
+                        usernameStatus === "available" ? "text-green-300" : "text-red-300"
+                      }`}
+                    >
+                      {usernameMessage}
+                    </p>
+                  )}
                 </label>
               )}
               
@@ -240,23 +366,61 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
                 <label className="text-sm text-zinc-400">
                   {isUpdatePassword ? "Yeni şifre" : "Şifre"}
                 </label>
-                <input 
-                  required 
-                  name="password" 
-                  minLength={6} 
-                  type={showPassword ? "text" : "password"} 
-                  autoComplete={isUpdatePassword ? "new-password" : isSignUp ? "new-password" : "current-password"} 
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-white/[.05] px-4 py-3.5 pr-12 text-white outline-none focus:border-blue-500" 
-                  placeholder="En az 6 karakter"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-8 text-zinc-400 hover:text-white transition"
-                >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
+                <div className="mt-2 relative">
+                  <input 
+                    required 
+                    name="password" 
+                    minLength={6} 
+                    type={showPassword ? "text" : "password"} 
+                    autoComplete={isUpdatePassword ? "new-password" : isSignUp ? "new-password" : "current-password"} 
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-white/[.05] px-4 py-3.5 pr-12 text-white outline-none focus:border-blue-500" 
+                    placeholder="En az 6 karakter"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white transition"
+                  >
+                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
               </div>
+              {(isSignUp || isUpdatePassword) && password.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Şifre gücü</span>
+                    <span>
+                      {passwordStrength === "weak"
+                        ? "Zayıf"
+                        : passwordStrength === "medium"
+                        ? "Orta"
+                        : "Güçlü"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {["weak", "medium", "strong"].map((level, index) => {
+                      const activeCount =
+                        passwordStrength === "weak" ? 1 : passwordStrength === "medium" ? 2 : 3;
+                      const isActive = index < activeCount;
+                      const color =
+                        passwordStrength === "weak"
+                          ? "bg-red-500"
+                          : passwordStrength === "medium"
+                          ? "bg-amber-500"
+                          : "bg-green-500";
+
+                      return (
+                        <span
+                          key={level}
+                          className={`h-2 rounded-full ${isActive ? color : "bg-white/10"}`}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               
               {/* Confirm password for sign-up and update-password */}
               {(isSignUp || isUpdatePassword) && (
@@ -264,24 +428,31 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
                   <label className="text-sm text-zinc-400">
                     Şifre tekrar
                   </label>
-                  <input 
-                    required 
-                    name="confirmPassword" 
-                    minLength={6} 
-                    type={showConfirmPassword ? "text" : "password"} 
-                    autoComplete="new-password" 
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-white/[.05] px-4 py-3.5 pr-12 text-white outline-none focus:border-blue-500" 
-                    placeholder="Şifreni tekrar gir"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-4 top-8 text-zinc-400 hover:text-white transition"
-                  >
-                    {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                  </button>
+                  <div className="mt-2 relative">
+                    <input 
+                      required 
+                      name="confirmPassword" 
+                      minLength={6} 
+                      type={showConfirmPassword ? "text" : "password"} 
+                      autoComplete="new-password" 
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full rounded-xl border border-white/10 bg-white/[.05] px-4 py-3.5 pr-12 text-white outline-none focus:border-blue-500" 
+                      placeholder="Şifreni tekrar gir"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white transition"
+                    >
+                      {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
+                  {confirmPassword.length > 0 && (
+                    <p className={`mt-2 text-xs ${passwordsMatch ? "text-green-300" : "text-red-300"}`}>
+                      {passwordsMatch ? "Şifreler eşleşiyor." : "Şifreler eşleşmiyor."}
+                    </p>
+                  )}
                 </div>
               )}
             </>
@@ -296,7 +467,11 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
           )}
           
           <button 
-            disabled={loading} 
+            disabled={
+              loading ||
+              ((isSignUp || isUpdatePassword) && (!passwordsMatch || password.length < 6)) ||
+              (isSignUp && usernameStatus !== "available")
+            } 
             className="mt-2 inline-flex items-center justify-center gap-2 rounded-full bg-blue-600 px-5 py-3.5 text-sm font-bold transition hover:bg-blue-500 disabled:opacity-60"
           >
             {loading ? <LoaderCircle className="animate-spin" size={17}/> : (
