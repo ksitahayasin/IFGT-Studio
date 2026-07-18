@@ -53,21 +53,27 @@ export function useSiteSettings() {
         setLoading(false);
         return;
       }
-      const { data } = await supabase.from("site_settings").select("*");
-      setSettings(data ?? []);
+      const { data, error } = await supabase.from("site_settings").select("*");
+      console.log("useSiteSettings Debug - data:", data);
+      console.log("useSiteSettings Debug - error:", error);
+      setSettings((data as SiteSetting[]) ?? []);
       setLoading(false);
     };
     load();
   }, []);
 
   const getSetting = (key: string): string => {
+    if (loading) return ""; // Don't return fallback while loading
     const setting = settings.find((s) => s.key === key);
+    console.log("getSetting Debug - key:", key, "setting:", setting);
     if (setting) {
       const value = locale === "tr" ? setting.value_tr : setting.value_en;
       if (value) return value;
       return setting.value;
     }
-    return fallbackSettings[key]?.[locale as "tr" | "en"] ?? fallbackSettings[key]?.en ?? "";
+    const fallback = fallbackSettings[key]?.[locale as "tr" | "en"] ?? fallbackSettings[key]?.en ?? "";
+    console.log("getSetting Debug - using fallback for key:", key, "fallback:", fallback);
+    return fallback;
   };
 
   return { settings, getSetting, loading };

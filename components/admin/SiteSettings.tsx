@@ -15,6 +15,7 @@ type SiteSetting = {
 export function SiteSettings() {
   const locale = useLocale();
   const [settings, setSettings] = useState<SiteSetting[]>([]);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -55,7 +56,9 @@ export function SiteSettings() {
 
   const loadSettings = async () => {
     if (!supabase) return;
-    const { data } = await supabase.from("site_settings").select("*");
+    setLoading(true);
+    const { data, error } = await supabase.from("site_settings").select("*");
+    console.log("loadSettings - data:", data, "error:", error);
     setSettings((data as SiteSetting[]) ?? []);
     // Set current hero bg URL in input
     const heroSetting = (data as SiteSetting[])?.find((s: SiteSetting) => s.key === "hero.backgroundImage");
@@ -76,6 +79,7 @@ export function SiteSettings() {
         setHeroGalleryInput([]);
       }
     }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -194,8 +198,14 @@ export function SiteSettings() {
 
   return (
     <section className="mt-10 grid gap-6">
-      {/* Hero Background Section */}
-      <div className="rounded-2xl border border-white/10 bg-white/[.03] p-6">
+      {loading ? (
+        <div className="rounded-2xl border border-white/10 bg-white/[.03] p-6 text-center">
+          <p className="text-zinc-400">Ayarlar yükleniyor...</p>
+        </div>
+      ) : (
+        <>
+          {/* Hero Background Section */}
+          <div className="rounded-2xl border border-white/10 bg-white/[.03] p-6">
         <h2 className="font-display text-2xl">Hero Arka Planı</h2>
         <div className="mt-5 grid gap-6">
           {/* Background Image */}
@@ -472,6 +482,8 @@ export function SiteSettings() {
           </div>
         </div>
       </div>
+        </>
+      )}
     </section>
   );
 }

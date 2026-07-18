@@ -11,12 +11,19 @@ import { useSiteSettings } from "@/lib/use-site-settings";
 export function Hero() {
   const locale = useLocale();
   const labels = heroLabels[locale];
-  const { getSetting } = useSiteSettings();
+  const { getSetting, loading } = useSiteSettings();
   const heroBg = getSetting("hero.backgroundImage");
   const heroVideo = getSetting("hero.backgroundVideo");
   const heroGalleryRaw = getSetting("hero.gallery");
   const [heroGallery, setHeroGallery] = useState<string[]>([]);
   const [currentGalleryIndex, setCurrentGalleryIndex] = useState(0);
+
+  // Debug logs
+  useEffect(() => {
+    console.log("Hero Debug - heroBg:", heroBg);
+    console.log("Hero Debug - heroVideo:", heroVideo);
+    console.log("Hero Debug - heroGalleryRaw:", heroGalleryRaw);
+  }, [heroBg, heroVideo, heroGalleryRaw]);
 
   // Parse gallery from settings
   useEffect(() => {
@@ -45,6 +52,13 @@ export function Hero() {
 
   return (
     <section className="relative flex min-h-[820px] items-end overflow-hidden pt-20">
+      {loading ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-black">
+          <p className="text-zinc-500">Yükleniyor...</p>
+        </div>
+      ) : (
+        <>
+
       {/* Background Video */}
       {hasVideo && (
         <div className="absolute inset-0">
@@ -146,6 +160,8 @@ export function Hero() {
           {labels.scroll}
         </div>
       </Container>
+        </>
+      )}
     </section>
   );
 }
